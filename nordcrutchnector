@@ -1,0 +1,315 @@
+#!/usr/bin/env python
+
+# -*- coding: utf-8 -*-
+
+import subprocess
+import sys
+import os.path
+import time
+import random
+
+def pout(msg : str):
+    print(msg)
+
+def exe(command : str) -> tuple:
+    '''
+    Аргумент - команда для выполнения в терминале. Например: "ls -lai ."
+    Возвращает кортеж, где элементы:
+        0 - строка stdout
+        1 - строка stderr
+        2 - returncode
+    '''
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = process.stdout.read().decode("utf-8")
+    err = process.stderr.read().decode("utf-8") 
+    errcode = process.returncode
+    return (out, err, errcode)
+
+def mkdir_p_if_not_exist(dir : str) -> bool:
+    dir_abs = str(os.path.abspath(dir))
+    check_file = os.path.exists(dir_abs)
+    if( check_file == True and os.path.isdir(dir_abs) == False ):
+                # Этот файл не директория
+        errorExit(f"{dir_abs} is not directory. ")
+    if(check_file == False): 
+                # Файла нет, значит создать
+        anw = exe(f"mkdir -p {dir_abs}")
+        if(anw[1] != ""):
+            errorExit(anw[1])
+
+def cutStr(cutted_str : str, l:str = None, r:str = None) -> str:
+    ccc = cutted_str
+    if(l != None):
+        lccc = ccc.find(l)
+        if(lccc != -1):
+            ccc = ccc[lccc+len(l):]
+    if(r != None):
+        rccc = ccc.find(r)
+        if(rccc != -1):
+            ccc = ccc[:rccc]
+    return ccc
+
+def is_int(x : str):
+    try:
+        tempVal = int(x)
+        return True
+    except:
+        return False
+
+def ifping() -> bool:
+    anw = exe("ping -c 10 -I tun0 8.8.8.8")
+    if(anw[1] != ""):
+    #    errorExit("no internet=/")
+        return False
+    if(anw[0].find(", 0% packet loss") != -1):
+        return True
+    else:
+        return False
+
+def ifkeepping() -> bool:
+    anw = exe("ping -c 10 -I tun0 8.8.8.8")
+    if(anw[1] != ""):
+    #    errorExit("no internet=/")
+        return False
+    if(anw[0].find(", 100% packet loss") != -1):
+        return False
+    else:
+        return True
+
+def errorExit(msg : str, prefix = "\nError: "):
+    print(prefix + msg)
+    exit()
+
+def errorSyntaxExit():
+    errorExit("Check README.md", prefix = "\nSyntax error: ")
+
+'''
+nordcrutchnector  diff   dir_one  dir_two [outdir] 
+      0            1        2         3       4
+'''
+def main_diff(argv : list):
+    argc = len(argv)
+    if(argc == 4):
+        dir_1 = str(os.path.abspath(argv[2]))
+        dir_2 = str(os.path.abspath(argv[3]))
+        dir_out = None
+    elif(argc == 5):
+        dir_1 = str(os.path.abspath(argv[2]))
+        dir_2 = str(os.path.abspath(argv[3]))
+        dir_out = str(os.path.abspath(argv[4]))
+    else:
+        errorSyntaxExit()
+    
+    ans = exe(f"diff {dir_1} {dir_2}")
+    if(ans[1] != ""):
+        errorExit(ans[1])
+
+    files = list(ans[0].split("\n"))
+    fs = []
+    for i in range(len(files)):
+        if(files[i].find("Only in ") != -1):
+            files[i] = cutStr(files[i], l="Only in ")
+            if(files[i].find(dir_2) != -1):
+                fs.append(files[i])
+    for i in range(len(fs)):
+        buffS = fs[i]
+        where_end = buffS.find(dir_2)+len(dir_2)+2
+        buffS = os.path.join(dir_2, '') + buffS[where_end:]
+        fs[i] = buffS
+    pout("\nNew ones were found: ")
+    for fi in fs:
+        pout(fi)
+
+    if(dir_out != None):
+        mkdir_p_if_not_exist(dir_out)
+        pout("\nCoping: ")
+        for fi in fs:
+            if(os.path.isdir(fi) == False):
+                commandi = f"cp {fi} {dir_out}"
+                pout(commandi)
+                ans = exe(commandi)
+                if(ans[1] != ""):
+                    errorExit(ans[1])
+            else:
+                pout(f"!!! WARNING: {fi} is directory !!!")
+    pout("\n===FINISH===")
+
+LOGFILE = "log.txt"
+def check_daemon_connect() -> bool:
+    for i in range(10):
+        command = f"sudo cat {LOGFILE}"
+        anw = exe(command)
+        if(anw[1] != ""):
+            errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+        S = anw[0]
+        if(S.find("Initialization Sequence Completed") != -1):
+            return True
+        time.sleep(5)
+    return False
+
+def kill_daemon():
+    command = f"sudo killall -15 openvpn"
+    anw = exe(command)
+    if(anw[1] != ""):
+        pout(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+
+'''
+nordcrutchnector  connect  dir_ovpn [loginfile, delay]
+      0            1          2        3          4
+'''
+def main_connect(argv : list):
+    argc = len(argv)
+    if( not (argc == 3 or argc == 5) ):
+        errorSyntaxExit()
+    dirc = str(os.path.abspath(argv[2]))
+    if(argc == 5):
+        LOGINFILE = str(argv[3])
+        DELAY = int(argv[4])
+    else:
+        LOGINFILE = "login.txt"
+        DELAY = 20
+    if(os.path.isdir(dirc) == False):
+        errorExit(f"{dirc} is not directory. ")
+    if(len(os.listdir(dirc)) == 0):
+        errorExit(f"{dirc} is empty. ")
+    
+    fs = [os.path.join(dirc, f) for f in os.listdir(dirc) if os.path.isfile(os.path.join(dirc, f))]
+    random.shuffle(fs)
+    
+    before_ifconfig = exe("ip link show")[0]
+
+    i, n = 0, len(fs)
+    li = 0
+    pout("Connecting...")
+    while(True):
+        '''
+        ЦИКЛ
+        {
+            Попробовать приконектиться, запустив openvpndaemon
+            Подождать DELAY сек
+            Если есть openvpndaemon
+            {
+                попинговаться
+                если пингует, то всё ок
+                если не пингует, то уничтожить текущего openvpndaemon
+            }
+        }
+        '''
+        command = f"sudo openvpn --config {fs[i]} --auth-user-pass {os.path.abspath(LOGINFILE)} --daemon --auth-nocache --log {LOGFILE}"
+        # Initialization Sequence Completed
+        pout(f"> {command}")
+        anw = exe(command)
+        if(anw[1] != ""):
+            pout(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+
+        time.sleep(DELAY)
+
+        command = "pgrep openvpn"
+        anw = exe(command)
+        if(anw[1] != ""):
+            pout(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+        if(is_int(anw[0]) == True):
+            if(check_daemon_connect() == True):
+                PINGED = ifping()
+                if(PINGED == True):
+                    break
+                else:
+                    kill_daemon()
+            else:
+                kill_daemon()
+
+        i = (i+1) % n
+        li+=1
+        pout(f"\n({li}) It did not work out, trying another one...")
+
+    pout("\n===CONNECTED===")
+
+    pout(f"\nInterfaces before: \n{before_ifconfig}")
+    after_ifconfig = exe('ip link show')[0]
+    pout(f"\nInterfaces after: \n{after_ifconfig}")
+
+    command = f"sudo chown $USER {LOGFILE}"
+    pout(f"> {command}")
+    anw = exe(command)
+    if(anw[1] != ""):
+        errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+
+'''
+nordcrutchnector  keepconnect  dir_ovpn [loginfile, delay]
+      0            1               2        3          4
+'''
+def main_keepconnect(argv : list):
+    pout("NOTICE: Do not forget run it as root user. \n")
+    time.sleep(5)
+
+    main_disconnect([argv[0], "disconnect"])
+
+    gi = 1
+    while(True):
+        pout(f"keepconnect {gi}:")
+        main_connect(argv)
+        while(True):
+            PINGED = ifkeepping()
+            if(PINGED == False):
+                break
+            time.sleep(5)
+        main_disconnect([argv[0], "disconnect"])
+        gi+=1
+
+'''
+nordcrutchnector  checkip  
+        0            1
+'''
+def main_checkip(argv : list):
+    command = f"curl ifconfig.me"
+    anw = exe(command)
+    #if(anw[1] != ""):
+    #    errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+    ip1 = anw[0]
+
+    command = f"curl ipinfo.io/ip"
+    anw = exe(command)
+    #if(anw[1] != ""):
+    #    errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+    ip2 = anw[0]
+
+    command = f"curl ipecho.net/plain"
+    anw = exe(command)
+    #if(anw[1] != ""):
+    #    errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
+    ip3 = anw[0]
+
+    pout("Your ip: ")
+    print(f"\tifconfig.me:       {ip1}")
+    print(f"\tipinfo.io/ip:      {ip2}")
+    print(f"\tiipecho.net/plain: {ip3}")
+
+'''
+nordcrutchnector   disconnect  
+        0            1
+'''
+def main_disconnect(argv : list):
+    before_ifconfig = exe("ip link show")[0]
+    pout(f"\nInterfaces before: \n{before_ifconfig}")
+    kill_daemon()
+    time.sleep(5)
+    after_ifconfig = exe('ip link show')[0]
+    pout(f"\nInterfaces after: \n{after_ifconfig}")
+
+if __name__ == '__main__':
+    argc = len(sys.argv)
+    if(argc < 2):
+        errorSyntaxExit()
+
+    if(sys.argv[1] == "diff"):
+        main_diff(sys.argv)
+    elif(sys.argv[1] == "connect"):
+        main_connect(sys.argv)
+    elif(sys.argv[1] == "checkip"):
+        main_checkip(sys.argv)
+    elif(sys.argv[1] == "disconnect"):
+        main_disconnect(sys.argv)
+    elif(sys.argv[1] == "keepconnect"):
+        main_keepconnect(sys.argv)
+    else:
+        errorSyntaxExit()
