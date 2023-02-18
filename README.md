@@ -42,6 +42,22 @@
 
 После выполнения данной команды в директории `outdir` появятся "новые" сервера, которые ещё, скорее всего, не успели зaблoкиpoвaть. Эти "новые" сервера и нужны при дальнейшем использовании.
 
+## download
+
+Скачает автоматически архив отсюда: [https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip](https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip).
+
+``` bash
+> nordcrutchnector download /path/to/directory
+```
+
+## diffzip
+
+Всё как в пункте [diff](##diff), но ничего не надо разархивировать.
+
+``` bash
+> nordcrutchnector diffzip /path/to/оvрn-old.zip /path/to/оvрn-new.zip /path/to/out.zip
+```
+
 ## connect
 
 Скачайте отсюда: [https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip](https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip) - архив (чтобы скачать этот архив, очень вероятно, вам понадобится прoкcи или vрn). Извлеките из него все `оvрn-файлы` в отдельную директорию. Если при дальнейшем подключение к серверам будет блoкиpoваться, то см. пункт [выше](##diff-или-если-подключение-блoкируeтся).
