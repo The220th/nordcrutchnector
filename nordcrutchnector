@@ -4,13 +4,16 @@
 
 import subprocess
 import sys
+import os
 import os.path
 import time
 import random
+import datetime
 
-import os
 import zipfile
 import requests
+
+import json
 
 def pout(msg : str):
     print(msg)
@@ -70,13 +73,22 @@ def ifping() -> bool:
     else:
         return False
 
-def ifkeepping() -> bool:
+def ifkeepping(deep: int = 0) -> bool:
+    MAX_DEEP = 5
     anw = exe("ping -c 10 -I tun0 8.8.8.8")
     if(anw[1] != ""):
     #    errorExit("no internet=/")
-        return False
+        if(deep < MAX_DEEP):
+            time.sleep(5)
+            return ifkeepping(deep+1)
+        else:
+            return False
     if(anw[0].find(", 100% packet loss") != -1):
-        return False
+        if(deep < MAX_DEEP):
+            time.sleep(5)
+            return ifkeepping(deep+1)
+        else:
+            return False
     else:
         return True
 
@@ -216,6 +228,48 @@ def kill_daemon():
     if(anw[1] != ""):
         pout(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
 
+TOP_CONNECTS_JSON = "top_connects.json"
+
+def mark_connect(fn: str, save_to: str):
+    try:
+        if(os.path.isfile(save_to) == True):
+            with open(save_to, "r", encoding="utf-8") as fd:
+                s = fd.read()
+            d = json.loads(s)
+        else:
+            d = {}
+        if(fn not in d):
+            d[fn] = 1
+        else:
+            d[fn] += 1
+        d = dict(sorted(d.items(), key=lambda item: item[1], reverse=True))
+        jd = json.dumps(d)
+        with open(save_to, "w", encoding="utf-8") as fd:
+            fd.write(jd)
+            fd.flush()
+    except Exception as ex:
+        pout("(mark_connect) Cannot save top")
+        pout(ex)
+
+'''
+nordcrutchnector  top
+      0            1
+'''
+def main_top(argv: list):
+    argc = len(argv)
+    if(argc != 2):
+        pout(f"Expected: nordcrutchnector top")
+        errorSyntaxExit()
+    if(os.path.isfile(TOP_CONNECTS_JSON) == False):
+        pout(f"No such file yet: \"{TOP_CONNECTS_JSON}\". Run \"> nordcrutchnector connect ...\" or \"> nordcrutchnector keepconnect ...\" first")
+        exit()
+    with open(TOP_CONNECTS_JSON, "r", encoding="utf-8") as fd:
+        s = fd.read()
+        d = json.loads(s)
+    d = dict(sorted(d.items(), key=lambda item: item[1], reverse=True))
+    for i, d_i in enumerate(d):
+        print(f"{i+1}: {d_i}={d[d_i]}")
+
 '''
 nordcrutchnector  connect  dir_ovpn [loginfile, delay]
       0            1          2        3          4
@@ -259,7 +313,7 @@ def main_connect(argv : list):
             }
         }
         '''
-        command = f"sudo openvpn --config {fs[i]} --auth-user-pass {os.path.abspath(LOGINFILE)} --daemon --auth-nocache --log {LOGFILE}"
+        command = f"sudo openvpn --config \"{fs[i]}\" --auth-user-pass {os.path.abspath(LOGINFILE)} --daemon --auth-nocache --log {LOGFILE}" # to dont change route table use "--pull-filter ignore redirect-gateway"
         # Initialization Sequence Completed
         pout(f"> {command}")
         anw = exe(command)
@@ -298,6 +352,10 @@ def main_connect(argv : list):
     if(anw[1] != ""):
         errorExit(f"\n\n=====\nPROBLEM IN \"{command}\": {anw[1]}\n=====\n")
 
+    time_stamp = datetime.datetime.now().strftime("[%y.%m.%d %H:%M:%S.%f]")
+    pout(f"\n===CONNECTED TO \"{os.path.basename(fs[i])}\" ({time_stamp})===")
+    mark_connect(os.path.basename(fs[i]), TOP_CONNECTS_JSON)
+
 '''
 nordcrutchnector  keepconnect  dir_ovpn [loginfile, delay]
       0            1               2        3          4
@@ -317,6 +375,7 @@ def main_keepconnect(argv : list):
             if(PINGED == False):
                 break
             time.sleep(5)
+        pout(f"({gi}) Connection is broken. Connecting again...")
         main_disconnect([argv[0], "disconnect"])
         gi+=1
 
@@ -363,7 +422,7 @@ def main_disconnect(argv : list):
 if __name__ == '__main__':
     argc = len(sys.argv)
     if(argc < 2):
-        pout(f"Expected: nordcrutchnector [diff, diffzip, download, connect, checkip, disconnect, keepconnect] ...")
+        pout(f"Expected: nordcrutchnector [diff, diffzip, download, connect, top, checkip, disconnect, keepconnect] ...")
         errorSyntaxExit()
 
     if(sys.argv[1] == "diff"):
@@ -374,6 +433,8 @@ if __name__ == '__main__':
         main_download(sys.argv)
     elif(sys.argv[1] == "connect"):
         main_connect(sys.argv)
+    elif(sys.argv[1] == "top"):
+        main_top(sys.argv)
     elif(sys.argv[1] == "checkip"):
         main_checkip(sys.argv)
     elif(sys.argv[1] == "disconnect"):
